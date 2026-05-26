@@ -806,11 +806,272 @@ describe('FactoryFormatter', () => {
       const result = formatter.format(ast, { version: 'multifile' });
       const skill = result.additionalFiles?.[0];
       expect(skill).toBeDefined();
-      // Should use raw frontmatter instead of reconstructing
-      expect(skill?.content).toContain('custom-field: preserved');
+      // Factory filters unsupported fields — custom-field should be stripped
+      expect(skill?.content).not.toContain('custom-field: preserved');
+      // Supported fields should still appear
+      expect(skill?.content).toContain('name: test-skill');
       expect(skill?.content).toContain('description: A test skill');
-      // Verify frontmatter delimiters wrap raw content
-      expect(skill?.content).toMatch(/^---\n.*custom-field: preserved.*\n---/s);
+      expect(skill?.content).toContain('user-invocable: false');
+      expect(skill?.content).toContain('disable-model-invocation: true');
+    });
+
+    it('should strip unsupported frontmatter fields from raw frontmatter', () => {
+      const ast: Program = {
+        ...createMinimalProgram(),
+        blocks: [
+          {
+            type: 'Block',
+            name: 'skills',
+            content: {
+              type: 'ObjectContent',
+              properties: {
+                promptscript: {
+                  description: 'PromptScript language expert',
+                  content: 'Language guide content.',
+                  __rawFrontmatter: [
+                    '# promptscript-generated: 2026-04-06T08:34:33.387Z',
+                    'name: promptscript',
+                    'description: PromptScript language expert',
+                    'license: MIT',
+                    'metadata:',
+                    '  author: PromptScript',
+                    '  homepage: https://getpromptscript.dev',
+                    'compatibility:',
+                    '  - claude-code',
+                    '  - factory-ai',
+                    'allowed-tools:',
+                    '  - Read',
+                    '  - Write',
+                    'user-invocable: true',
+                  ].join('\n'),
+                },
+              },
+              loc: createLoc(),
+            },
+            loc: createLoc(),
+          },
+        ],
+      };
+
+      const result = formatter.format(ast, { version: 'multifile' });
+      const skill = result.additionalFiles?.[0];
+      expect(skill).toBeDefined();
+
+      // Supported fields should be preserved
+      expect(skill?.content).toContain('name: promptscript');
+      expect(skill?.content).toContain('description: PromptScript language expert');
+      expect(skill?.content).toContain('user-invocable: true');
+
+      // Unsupported fields and comments should be stripped
+      expect(skill?.content).not.toContain('# promptscript-generated');
+      expect(skill?.content).not.toContain('license: MIT');
+      expect(skill?.content).not.toContain('metadata:');
+      expect(skill?.content).not.toContain('author: PromptScript');
+      expect(skill?.content).not.toContain('compatibility:');
+      expect(skill?.content).not.toContain('allowed-tools:');
+    });
+
+    it('should handle empty lines within unsupported nested blocks', () => {
+      const ast: Program = {
+        ...createMinimalProgram(),
+        blocks: [
+          {
+            type: 'Block',
+            name: 'skills',
+            content: {
+              type: 'ObjectContent',
+              properties: {
+                'test-skill': {
+                  description: 'A test skill',
+                  content: 'Content.',
+                  __rawFrontmatter: [
+                    'name: test-skill',
+                    'description: A test skill',
+                    'metadata:',
+                    '  author: Test',
+                    '',
+                    '  homepage: https://example.com',
+                    'user-invocable: true',
+                  ].join('\n'),
+                },
+              },
+              loc: createLoc(),
+            },
+            loc: createLoc(),
+          },
+        ],
+      };
+
+      const result = formatter.format(ast, { version: 'multifile' });
+      const skill = result.additionalFiles?.[0];
+      expect(skill).toBeDefined();
+
+      // Supported fields preserved
+      expect(skill?.content).toContain('name: test-skill');
+      expect(skill?.content).toContain('description: A test skill');
+      expect(skill?.content).toContain('user-invocable: true');
+
+      // Unsupported block with empty line inside should be stripped entirely
+      expect(skill?.content).not.toContain('metadata:');
+      expect(skill?.content).not.toContain('author: Test');
+      expect(skill?.content).not.toContain('homepage:');
+    });
+
+    it('should handle empty lines between fields in raw frontmatter', () => {
+      const ast: Program = {
+        ...createMinimalProgram(),
+        blocks: [
+          {
+            type: 'Block',
+            name: 'skills',
+            content: {
+              type: 'ObjectContent',
+              properties: {
+                'test-skill': {
+                  description: 'A test skill',
+                  content: 'Content.',
+                  __rawFrontmatter: [
+                    'name: test-skill',
+                    '',
+                    'description: A test skill',
+                    '',
+                    'user-invocable: true',
+                  ].join('\n'),
+                },
+              },
+              loc: createLoc(),
+            },
+            loc: createLoc(),
+          },
+        ],
+      };
+
+      const result = formatter.format(ast, { version: 'multifile' });
+      const skill = result.additionalFiles?.[0];
+      expect(skill).toBeDefined();
+
+      // Empty lines between supported fields are stripped
+      expect(skill?.content).toContain('name: test-skill');
+      expect(skill?.content).toContain('description: A test skill');
+      expect(skill?.content).toContain('user-invocable: true');
+
+      // Verify the frontmatter has no blank lines inside it
+      const frontmatter = skill?.content?.match(/^---\n([\s\S]*?)\n---/)?.[1];
+      expect(frontmatter).toBeDefined();
+      expect(frontmatter).not.toMatch(/^\s*$/m);
+    });
+
+    it('should preserve all supported fields when raw frontmatter has only supported fields', () => {
+      const ast: Program = {
+        ...createMinimalProgram(),
+        blocks: [
+          {
+            type: 'Block',
+            name: 'skills',
+            content: {
+              type: 'ObjectContent',
+              properties: {
+                'clean-skill': {
+                  description: 'Clean skill',
+                  content: 'Content.',
+                  __rawFrontmatter: [
+                    'name: clean-skill',
+                    'description: Clean skill',
+                    'user-invocable: true',
+                    'disable-model-invocation: false',
+                  ].join('\n'),
+                },
+              },
+              loc: createLoc(),
+            },
+            loc: createLoc(),
+          },
+        ],
+      };
+
+      const result = formatter.format(ast, { version: 'multifile' });
+      const skill = result.additionalFiles?.[0];
+      expect(skill).toBeDefined();
+
+      expect(skill?.content).toContain('name: clean-skill');
+      expect(skill?.content).toContain('description: Clean skill');
+      expect(skill?.content).toContain('user-invocable: true');
+      expect(skill?.content).toContain('disable-model-invocation: false');
+    });
+
+    it('should strip all fields when raw frontmatter has only unsupported fields', () => {
+      const ast: Program = {
+        ...createMinimalProgram(),
+        blocks: [
+          {
+            type: 'Block',
+            name: 'skills',
+            content: {
+              type: 'ObjectContent',
+              properties: {
+                'unsupported-skill': {
+                  description: 'Unsupported',
+                  content: 'Content.',
+                  __rawFrontmatter: ['license: MIT', 'version: "1.0.0"'].join('\n'),
+                },
+              },
+              loc: createLoc(),
+            },
+            loc: createLoc(),
+          },
+        ],
+      };
+
+      const result = formatter.format(ast, { version: 'multifile' });
+      const skill = result.additionalFiles?.[0];
+      expect(skill).toBeDefined();
+
+      // All fields stripped — frontmatter should be empty between delimiters
+      expect(skill?.content).not.toContain('license: MIT');
+      expect(skill?.content).not.toContain('version:');
+
+      // Frontmatter should still have delimiters
+      expect(skill?.content).toContain('---');
+    });
+
+    it('should handle deeply nested unsupported blocks', () => {
+      const ast: Program = {
+        ...createMinimalProgram(),
+        blocks: [
+          {
+            type: 'Block',
+            name: 'skills',
+            content: {
+              type: 'ObjectContent',
+              properties: {
+                'deep-skill': {
+                  description: 'Deep nesting',
+                  content: 'Content.',
+                  __rawFrontmatter: [
+                    'name: deep-skill',
+                    'metadata:',
+                    '  nested:',
+                    '    deep-key: deep-value',
+                    'description: Deep nesting',
+                  ].join('\n'),
+                },
+              },
+              loc: createLoc(),
+            },
+            loc: createLoc(),
+          },
+        ],
+      };
+
+      const result = formatter.format(ast, { version: 'multifile' });
+      const skill = result.additionalFiles?.[0];
+      expect(skill).toBeDefined();
+
+      expect(skill?.content).toContain('name: deep-skill');
+      expect(skill?.content).toContain('description: Deep nesting');
+      expect(skill?.content).not.toContain('metadata:');
+      expect(skill?.content).not.toContain('nested:');
+      expect(skill?.content).not.toContain('deep-key:');
     });
 
     it('should emit allowed-tools in YAML frontmatter', () => {
